@@ -154,7 +154,7 @@ function HistoryPage() {
                     {scan.timestampLabel}
                   </p>
                   <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium">{scan.name ?? "Unknown user"}</p>
+                    <p className="truncate text-sm font-medium">{scan.name ?? "Guest"}</p>
                     <p className="truncate font-mono text-xs text-muted-foreground">
                       {scan.uid || "UID unknown"}
                     </p>
