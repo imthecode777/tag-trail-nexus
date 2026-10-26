@@ -108,10 +108,10 @@ function asBoolean(value: unknown): boolean | null {
   if (typeof value === "number") return value !== 0;
   if (typeof value === "string") {
     const text = value.toUpperCase();
-    if (text.includes("NOT") || text.includes("FALSE") || text.includes("FAIL") || text.includes("DIS")) {
+    if (text.includes("NOT") || text.includes("FALSE") || text.includes("FAIL") || text.includes("DIS") || text.includes("DENIED")) {
       return false;
     }
-    if (text.includes("TRUE") || text.includes("OK") || text.includes("SYNC") || text.includes("CONNECT")) {
+    if (text.includes("TRUE") || text.includes("OK") || text.includes("SYNC") || text.includes("CONNECT") || text.includes("GRANTED")) {
       return true;
     }
   }
