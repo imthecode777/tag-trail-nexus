@@ -300,9 +300,9 @@ export async function registerUser(name: string, uid: string, role: UserRole): P
     timeoutMs: 12000,
   });
   const record = asRecord(payload);
-  if (record && (record.success === false || record.ok === false || record.error ||
-    ["error", "failed", "failure", "rejected"].includes(String(record.status ?? record.result).toLowerCase()))) {
-    throw new Esp32Error("http", asString(record.message ?? record.error) ?? "The reader rejected registration.");
+  if (record && (record["success"] === false || record["ok"] === false || record["error"] ||
+    ["error", "failed", "failure", "rejected"].includes(String(record["status"] ?? record["result"]).toLowerCase()))) {
+    throw new Esp32Error("http", asString(record["message"] ?? record["error"]) ?? "The reader rejected registration.");
   }
   for (let attempt = 0; attempt < 3; attempt++) {
     if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, 500));
