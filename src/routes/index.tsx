@@ -14,7 +14,7 @@ import {
   LoadingRows,
 } from "@/components/nexus/shared";
 import { useEsp32BaseUrl } from "@/hooks/use-esp32-base-url";
-import { fetchLogs, fetchStatus, formatUptime, latestByUid, type Esp32Status } from "@/lib/esp32";
+import { fetchLogs, fetchStatus, formatUptime, identityLabel, latestByUid, type Esp32Status } from "@/lib/esp32";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -147,8 +147,9 @@ function HomePage() {
               <div className="mt-4 flex flex-wrap items-end justify-between gap-4">
                 <div className="min-w-0">
                   <p className="truncate text-2xl font-semibold tracking-tight">
-                    {latest.name ?? "Guest"}
+                    {identityLabel(latest.name)}
                   </p>
+                  <p className="mt-1 text-sm text-muted-foreground">{identityLabel(latest.role)}</p>
                   <p className="mt-1 font-mono text-sm text-muted-foreground">
                     UID {latest.uid || "unknown"}
                   </p>
@@ -179,7 +180,8 @@ function HomePage() {
                   )}
                 />
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-medium">{entry.scan.name ?? "Guest"}</p>
+                  <p className="truncate text-sm font-medium">{identityLabel(entry.scan.name)}</p>
+                  <p className="text-xs text-muted-foreground">{identityLabel(entry.scan.role)}</p>
                   <p className="truncate font-mono text-xs text-muted-foreground">
                     {entry.scan.uid || "UID unknown"}
                   </p>

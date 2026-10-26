@@ -5,6 +5,7 @@ function makeScan(uid: string, ms: number, granted: boolean | null = true): Esp3
   return {
     uid,
     name: `User ${uid}`,
+    role: null,
     granted,
     timestampLabel: "",
     timestampDate: new Date(ms),
@@ -18,9 +19,9 @@ describe("latestByUid", () => {
     const latest = latestByUid(scans);
 
     expect(latest).toHaveLength(2);
-    expect(latest[0]!.scan.uid).toBe("A1");
-    expect(latest[0]!.scan.timestampDate!.getTime()).toBe(5000);
-    expect(latest[1]!.scan.uid).toBe("B2");
+    expect(latest[0]?.scan.uid).toBe("A1");
+    expect(latest[0]?.scan.timestampDate?.getTime()).toBe(5000);
+    expect(latest[1]?.scan.uid).toBe("B2");
   });
 
   it("uses the device's newest-first order when timestamps are not parseable", () => {
@@ -32,8 +33,8 @@ describe("latestByUid", () => {
     const latest = latestByUid(scans);
 
     expect(latest).toHaveLength(2);
-    expect(latest[0]!.scan.uid).toBe("A1");
-    expect(latest[1]!.scan.uid).toBe("B2");
+    expect(latest[0]?.scan.uid).toBe("A1");
+    expect(latest[1]?.scan.uid).toBe("B2");
   });
 
   it("falls back to the name as the identity when the UID is missing", () => {
@@ -56,7 +57,7 @@ describe("parseScan", () => {
   it("converts epoch seconds to a date without inventing timestamps", () => {
     const scan = parseScan({ uid: "A1", timestamp: 1761427181 });
     expect(scan.timestampDate).toBeInstanceOf(Date);
-    expect(scan.timestampDate!.getTime()).toBe(1761427181 * 1000);
+    expect(scan.timestampDate?.getTime()).toBe(1761427181 * 1000);
   });
 
   it("shows the raw device string when the timestamp cannot be parsed", () => {

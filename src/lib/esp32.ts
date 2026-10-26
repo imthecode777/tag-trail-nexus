@@ -23,6 +23,25 @@ export const DEFAULT_ESP32_BASE_URL = "http://192.168.220.10";
 const BASE_URL_STORAGE_KEY = "rfid-nexus:esp32-base-url";
 export const BASE_URL_EVENT = "rfid-nexus:base-url-changed";
 
+export const USER_ROLES = ["Student", "Staff"] as const;
+export type UserRole = (typeof USER_ROLES)[number];
+
+function identityValue(value: unknown): string | null {
+  const text = asString(value)?.trim();
+  return text && !["unknown", "unknown user", "undefined", "null", "guest"].includes(text.toLowerCase())
+    ? text
+    : null;
+}
+
+export function identityLabel(value: string | null): string {
+  return identityValue(value) ?? "Undefined";
+}
+
+function parseRole(record: Json): string | null {
+  const role = identityValue(pick(record, ["role", "user_role", "userRole", "category", "type"]));
+  return USER_ROLES.find((option) => option.toLowerCase() === role?.toLowerCase()) ?? role;
+}
+
 export type Esp32FailureKind = "offline" | "http" | "parse";
 export type Esp32ConnectionState = "connecting" | "connected" | "disconnected";
 
@@ -89,10 +108,10 @@ function asBoolean(value: unknown): boolean | null {
   if (typeof value === "number") return value !== 0;
   if (typeof value === "string") {
     const text = value.toUpperCase();
-    if (text.includes("NOT") || text.includes("FALSE") || text.includes("FAIL") || text.includes("DIS")) {
+    if (text.includes("NOT") || text.includes("FALSE") || text.includes("FAIL") || text.includes("DIS") || text.includes("DENIED")) {
       return false;
     }
-    if (text.includes("TRUE") || text.includes("OK") || text.includes("SYNC") || text.includes("CONNECT")) {
+    if (text.includes("TRUE") || text.includes("OK") || text.includes("SYNC") || text.includes("CONNECT") || text.includes("GRANTED")) {
       return true;
     }
   }
@@ -114,6 +133,7 @@ function extractArray(payload: unknown, keys: string[]): unknown[] {
 export interface Esp32Scan {
   uid: string;
   name: string | null;
+  role: string | null;
   granted: boolean | null;
   timestampLabel: string;
   timestampDate: Date | null;
@@ -151,27 +171,32 @@ export function parseTimestamp(value: unknown): { date: Date | null; label: stri
 export function parseScan(entry: unknown): Esp32Scan {
   const record = asRecord(entry) ?? {};
   const uid = asString(pick(record, ["uid", "card_uid", "rfid_uid", "rfid", "tag", "card", "id"])) ?? "";
-  const name = asString(pick(record, ["name", "user_name", "username", "user", "owner", "holder"]));
+  const name = identityValue(pick(record, ["name", "user_name", "username", "user", "owner", "holder"]));
   const granted = asBoolean(
     pick(record, ["granted", "access_granted", "access_result", "access", "allowed", "result", "status"]),
   );
   const { date, label } = parseTimestamp(
     pick(record, ["timestamp", "time", "epoch", "unix", "ts", "datetime", "date_time", "logged_at", "created_at"]),
   );
-  return { uid, name, granted, timestampLabel: label, timestampDate: date, raw: record };
+  return { uid, name, role: parseRole(record), granted, timestampLabel: label, timestampDate: date, raw: record };
 }
 
 export interface Esp32User {
   uid: string;
   name: string | null;
+  role: string | null;
   registered: boolean;
 }
 
 export function parseUser(entry: unknown): Esp32User {
   const record = asRecord(entry) ?? {};
   const uid = asString(pick(record, ["uid", "card_uid", "rfid_uid", "rfid", "tag", "card", "id"])) ?? "";
-  const name = asString(pick(record, ["name", "user_name", "username", "user", "owner", "holder"]));
-  return { uid, name, registered: true };
+  const name = identityValue(pick(record, ["name", "user_name", "username", "user", "owner", "holder"]));
+  return { uid, name, role: parseRole(record), registered: true };
+}
+
+export function normalizeUid(uid: string): string {
+  return uid.trim().replace(/[\s:-]+/g, "").toUpperCase();
 }
 
 export interface Esp32Status {
@@ -218,7 +243,7 @@ async function requestJson(path: string, init?: Omit<RequestInit, "signal"> & { 
     }
   } catch (error) {
     if (error instanceof Esp32Error) throw error;
-    throw new Esp32Error("offline", "Could not reach the ESP32 from this browser.");
+    throw new Esp32Error("offline", "Cannot reach the ESP32. Check its address in connection settings and use the same Wi-Fi as the reader. HTTPS pages may block an HTTP reader; use a trusted HTTPS address for the device. The reader must also allow this page's origin (CORS).");
   } finally {
     clearTimeout(timer);
   }
@@ -258,16 +283,39 @@ export async function fetchLogs(limit?: number): Promise<Esp32Scan[]> {
  * Only resolves when the device itself accepted the request — there is never a
  * browser-only "fake success".
  */
-export async function registerUser(name: string, uid: string): Promise<string> {
+export async function registerUser(name: string, uid: string, role: UserRole): Promise<Esp32User> {
+  const cleanName = name.trim();
+  const cleanUid = normalizeUid(uid);
+  if (!cleanName || !cleanUid || !USER_ROLES.includes(role)) {
+    throw new Esp32Error("parse", "Name, RFID UID and a Student or Staff role are required.");
+  }
+  const existing = await fetchUsers();
+  if (existing.some((user) => normalizeUid(user.uid) === cleanUid)) {
+    throw new Esp32Error("http", `UID ${uid.trim()} is already registered.`);
+  }
   const payload = await requestJson("/api/register", {
     method: "POST",
     headers: { "Content-Type": "application/json", Accept: "application/json" },
-    body: JSON.stringify({ name, uid }),
+    body: JSON.stringify({ name: cleanName, uid: uid.trim().replace(/\s+/g, " "), role }),
     timeoutMs: 12000,
   });
   const record = asRecord(payload);
-  const message = record ? asString(pick(record, ["message", "status", "result", "response"])) : null;
-  return message ?? "The device accepted the registration.";
+  if (record && (record["success"] === false || record["ok"] === false || record["error"] ||
+    ["error", "failed", "failure", "rejected"].includes(String(record["status"] ?? record["result"]).toLowerCase()))) {
+    throw new Esp32Error("http", asString(record["message"] ?? record["error"]) ?? "The reader rejected registration.");
+  }
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, 500));
+    const users = await fetchUsers();
+    const saved = users.find((user) => normalizeUid(user.uid) === cleanUid);
+    if (saved) {
+      if (saved.name !== cleanName || saved.role !== role) {
+        throw new Esp32Error("parse", "The card exists on the reader, but its name or role was not saved correctly. The ESP32 firmware must store and return both name and role.");
+      }
+      return saved;
+    }
+  }
+  throw new Esp32Error("parse", "Registration could not be confirmed in the reader's user list. Check that the ESP32 implements POST /api/register and saves the user.");
 }
 
 // ---------- Home-page derivation: unique latest punches ----------
@@ -287,7 +335,10 @@ export function latestByUid(scans: Esp32Scan[]): LatestPunch[] {
   const map = new Map<string, Esp32Scan>();
   for (const scan of scans) {
     const key = scan.uid || scan.name || "unknown";
-    if (!map.has(key)) map.set(key, scan);
+    const previous = map.get(key);
+    if (!previous || (scan.timestampDate && previous.timestampDate && scan.timestampDate > previous.timestampDate)) {
+      map.set(key, scan);
+    }
   }
   const entries = [...map.entries()].map(([key, scan]) => ({ key, scan }));
   if (entries.length > 1 && entries.every((entry) => entry.scan.timestampDate)) {

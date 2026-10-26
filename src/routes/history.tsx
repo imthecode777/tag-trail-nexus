@@ -13,7 +13,7 @@ import {
   LoadingRows,
 } from "@/components/nexus/shared";
 import { useEsp32BaseUrl } from "@/hooks/use-esp32-base-url";
-import { fetchLogs } from "@/lib/esp32";
+import { fetchLogs, identityLabel } from "@/lib/esp32";
 
 export const Route = createFileRoute("/history")({
   head: () => ({
@@ -71,6 +71,7 @@ function HistoryPage() {
       if (!query) return true;
       return (
         (scan.name?.toLowerCase().includes(query) ?? false) ||
+        (scan.role?.toLowerCase().includes(query) ?? false) ||
         scan.uid.toLowerCase().includes(query)
       );
     });
@@ -99,9 +100,9 @@ function HistoryPage() {
           <Input
             value={search}
             onChange={(event) => setSearch(event.target.value)}
-            placeholder="Search by name or UID"
+            placeholder="Search by name, role or UID"
             className="rounded-full pl-9"
-            aria-label="Search scans by name or UID"
+            aria-label="Search scans by name, role or UID"
           />
         </div>
         <div className="glass-soft inline-flex rounded-full p-1" role="group" aria-label="Filter by access result">
@@ -154,7 +155,8 @@ function HistoryPage() {
                     {scan.timestampLabel}
                   </p>
                   <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium">{scan.name ?? "Guest"}</p>
+                    <p className="truncate text-sm font-medium">{identityLabel(scan.name)}</p>
+                    <p className="text-xs text-muted-foreground">{identityLabel(scan.role)}</p>
                     <p className="truncate font-mono text-xs text-muted-foreground">
                       {scan.uid || "UID unknown"}
                     </p>

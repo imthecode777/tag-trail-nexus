@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -24,7 +25,7 @@ import {
 import { PageShell } from "@/components/nexus/page-shell";
 import { DisconnectedCard, EmptyState, LoadingRows } from "@/components/nexus/shared";
 import { useEsp32BaseUrl } from "@/hooks/use-esp32-base-url";
-import { Esp32Error, fetchUsers, registerUser, type Esp32User } from "@/lib/esp32";
+import { Esp32Error, fetchUsers, identityLabel, normalizeUid, registerUser, USER_ROLES, type UserRole, type Esp32User } from "@/lib/esp32";
 
 export const Route = createFileRoute("/register")({
   head: () => ({
@@ -94,8 +95,9 @@ function UserActions({ user }: { user: Esp32User }) {
 function UserRow({ user }: { user: Esp32User }) {
   return (
     <TableRow className="border-border/60">
-      <TableCell className="font-medium">{user.name ?? "Unknown user"}</TableCell>
+      <TableCell className="font-medium">{identityLabel(user.name)}</TableCell>
       <TableCell className="font-mono text-xs text-muted-foreground">{user.uid || "—"}</TableCell>
+      <TableCell>{identityLabel(user.role)}</TableCell>
       <TableCell>
         <Badge className="border-success/30 bg-success/15 text-success">REGISTERED</Badge>
       </TableCell>
@@ -119,6 +121,7 @@ function RegisterPage() {
 
   const [name, setName] = useState("");
   const [uid, setUid] = useState("");
+  const [role, setRole] = useState<UserRole>("Student");
   const [submitting, setSubmitting] = useState(false);
   const [feedback, setFeedback] = useState<FormFeedback | null>(null);
 
@@ -134,7 +137,7 @@ function RegisterPage() {
       setFeedback({ tone: "error", message: "Name and UID are both required." });
       return;
     }
-    if (users.some((user) => user.uid.toLowerCase() === cleanUid.toLowerCase())) {
+    if (users.some((user) => normalizeUid(user.uid) === normalizeUid(cleanUid))) {
       setFeedback({ tone: "error", message: `UID ${cleanUid} is already registered.` });
       return;
     }
@@ -142,19 +145,16 @@ function RegisterPage() {
     setSubmitting(true);
     setFeedback(null);
     try {
-      const message = await registerUser(cleanName, cleanUid);
-      setFeedback({ tone: "success", message: `${message} Added: ${cleanName} (${cleanUid}).` });
+      const saved = await registerUser(cleanName, cleanUid, role);
+      setFeedback({ tone: "success", message: `Registered ${saved.name} as ${saved.role} (${saved.uid}). Confirmed on the reader.` });
       setName("");
       setUid("");
-      await queryClient.invalidateQueries({ queryKey: ["esp32", "users", baseUrl] });
+      await queryClient.invalidateQueries({ queryKey: ["esp32"] });
     } catch (error) {
       const detail = error instanceof Esp32Error ? error.message : "The registration request failed.";
       setFeedback({
         tone: "error",
-        message:
-          `${detail} The device did not register this user. If your firmware does not implement ` +
-          `POST /api/register yet, registration must be added to the ESP32 firmware — this page ` +
-          `never pretends a user was saved on the device.`,
+        message: detail,
       });
     } finally {
       setSubmitting(false);
@@ -184,17 +184,15 @@ function RegisterPage() {
       <div className="glass-soft flex gap-3 rounded-2xl p-4 text-sm text-muted-foreground">
         <Info className="mt-0.5 size-4 shrink-0 text-primary" />
         <p>
-          Your current firmware exposes registered users through{" "}
-          <code className="font-mono text-xs text-foreground">GET /api/users</code>. Registering from
-          this page requires registration support in the firmware (e.g.{" "}
-          <code className="font-mono text-xs text-foreground">POST /api/register</code>) — if it
-          isn't implemented yet, you'll see the device's real error below instead of a fake success.
+          {usersQuery.isError
+            ? (usersQuery.error instanceof Esp32Error ? usersQuery.error.message : "The reader is unavailable.")
+            : "ESP32 reader: " + baseUrl}
         </p>
       </div>
 
       <form onSubmit={handleSubmit} className="glass rounded-3xl p-6" noValidate>
         <h2 className="text-lg font-semibold">Register a user</h2>
-        <div className="mt-5 grid gap-4 sm:grid-cols-2">
+        <div className="mt-5 grid gap-4 sm:grid-cols-3">
           <div className="grid gap-2">
             <Label htmlFor="register-name">Full name</Label>
             <Input
@@ -203,6 +201,7 @@ function RegisterPage() {
               onChange={(event) => setName(event.target.value)}
               placeholder="e.g. Aarav Sharma"
               autoComplete="off"
+              disabled={submitting}
             />
           </div>
           <div className="grid gap-2">
@@ -215,7 +214,18 @@ function RegisterPage() {
               className="font-mono"
               autoComplete="off"
               spellCheck={false}
+              disabled={submitting}
             />
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="register-role">Role</Label>
+            <Select value={role} disabled={submitting} onValueChange={(value) => {
+              const selected = USER_ROLES.find((option) => option === value);
+              if (selected) setRole(selected);
+            }}>
+              <SelectTrigger id="register-role"><SelectValue /></SelectTrigger>
+              <SelectContent>{USER_ROLES.map((option) => <SelectItem key={option} value={option}>{option}</SelectItem>)}</SelectContent>
+            </Select>
           </div>
         </div>
         {feedback && (
@@ -264,6 +274,7 @@ function RegisterPage() {
                   <TableRow className="border-border/60 hover:bg-transparent">
                     <TableHead>Name</TableHead>
                     <TableHead>RFID UID</TableHead>
+                    <TableHead>Role</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
@@ -285,7 +296,8 @@ function RegisterPage() {
                   style={{ animationDelay: `${Math.min(index * 40, 240)}ms` }}
                 >
                   <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium">{user.name ?? "Unknown user"}</p>
+                    <p className="truncate text-sm font-medium">{identityLabel(user.name)}</p>
+                    <p className="text-xs text-muted-foreground">{identityLabel(user.role)}</p>
                     <p className="truncate font-mono text-xs text-muted-foreground">
                       {user.uid || "UID unknown"}
                     </p>
